@@ -1,0 +1,337 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserStatus {
+  active
+  inactive
+}
+
+enum ContentType {
+  ASSIGNMENT
+  BROADCAST
+  ASSESSMENT
+}
+
+enum ContentStatus {
+  draft
+  published
+  archived
+}
+
+enum AttendanceStatus {
+  present
+  absent
+  late
+  excused
+}
+
+enum LeaveStatus {
+  pending
+  approved
+  rejected
+}
+
+model Organization {
+  id        String   @id @default(uuid())
+  name      String
+  slug      String   @unique
+  timezone  String   @default("Asia/Kolkata")
+  createdAt DateTime @default(now()) @map("created_at")
+  branches  Branch[]
+  users     User[]
+}
+
+model Branch {
+  id             String       @id @default(uuid())
+  organizationId String       @map("organization_id")
+  name           String
+  code           String
+  isActive       Boolean      @default(true) @map("is_active")
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  classes        Class[]
+  students       Student[]
+  contentItems   ContentItem[]
+  userRoles      UserBranchRole[]
+
+  @@unique([organizationId, code])
+}
+
+model User {
+  id             String           @id @default(uuid())
+  organizationId String           @map("organization_id")
+  email          String
+  passwordHash   String           @map("password_hash")
+  fullName       String           @map("full_name")
+  phone          String?
+  status         UserStatus       @default(active)
+  createdAt      DateTime         @default(now()) @map("created_at")
+  organization   Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  branchRoles    UserBranchRole[]
+  teacher        Teacher?
+  student        Student?
+  parent         Parent?
+  contentCreated ContentItem[]    @relation("ContentAuthor")
+  chatMessages   ChatMessage[]
+
+  @@unique([organizationId, email])
+}
+
+model Role {
+  id          String           @id @default(uuid())
+  code        String           @unique
+  name        String
+  permissions RolePermission[]
+  userRoles   UserBranchRole[]
+}
+
+model Permission {
+  id    String           @id @default(uuid())
+  code  String           @unique
+  name  String
+  roles RolePermission[]
+}
+
+model RolePermission {
+  roleId       String @map("role_id")
+  permissionId String @map("permission_id")
+  role         Role   @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission   Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@id([roleId, permissionId])
+}
+
+model UserBranchRole {
+  id       String  @id @default(uuid())
+  userId   String  @map("user_id")
+  branchId String  @map("branch_id")
+  roleId   String  @map("role_id")
+  user     User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  branch   Branch  @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  role     Role    @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, branchId, roleId])
+}
+
+model Teacher {
+  id           String   @id @default(uuid())
+  userId       String   @unique @map("user_id")
+  employeeCode String?  @map("employee_code")
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model Parent {
+  id     String              @id @default(uuid())
+  userId String              @unique @map("user_id")
+  user   User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  links  ParentStudentLink[]
+}
+
+model Student {
+  id               String              @id @default(uuid())
+  organizationId   String              @map("organization_id")
+  branchId         String              @map("branch_id")
+  userId           String?             @unique @map("user_id")
+  admissionNo      String              @map("admission_no")
+  firstName        String              @map("first_name")
+  lastName         String              @map("last_name")
+  busNumber        String?             @map("bus_number")
+  currentSectionId String?             @map("current_section_id")
+  branch           Branch              @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  user             User?               @relation(fields: [userId], references: [id], onDelete: SetNull)
+  section          Section?            @relation(fields: [currentSectionId], references: [id], onDelete: SetNull)
+  parentLinks      ParentStudentLink[]
+  attendance       AttendanceRecord[]
+  submissions      ContentSubmission[]
+}
+
+model ParentStudentLink {
+  id           String @id @default(uuid())
+  parentId     String @map("parent_id")
+  studentId    String @map("student_id")
+  relationship String @default("guardian")
+  parent       Parent @relation(fields: [parentId], references: [id], onDelete: Cascade)
+  student      Student @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  @@unique([parentId, studentId])
+}
+
+model AcademicYear {
+  id             String @id @default(uuid())
+  organizationId String @map("organization_id")
+  name           String
+  isCurrent      Boolean @default(false) @map("is_current")
+  classes        Class[]
+}
+
+model Class {
+  id             String       @id @default(uuid())
+  branchId       String       @map("branch_id")
+  academicYearId String       @map("academic_year_id")
+  name           String
+  gradeLevel     Int          @map("grade_level")
+  branch         Branch       @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  academicYear   AcademicYear @relation(fields: [academicYearId], references: [id], onDelete: Cascade)
+  sections       Section[]
+}
+
+model Section {
+  id        String    @id @default(uuid())
+  classId   String    @map("class_id")
+  name      String
+  class     Class     @relation(fields: [classId], references: [id], onDelete: Cascade)
+  students  Student[]
+}
+
+model Subject {
+  id             String @id @default(uuid())
+  organizationId String @map("organization_id")
+  name           String
+  code           String
+}
+
+model ContentItem {
+  id             String            @id @default(uuid())
+  organizationId String            @map("organization_id")
+  branchId       String            @map("branch_id")
+  type           ContentType
+  title          String
+  body           String            @default("")
+  status         ContentStatus     @default(draft)
+  publishAt      DateTime?         @map("publish_at")
+  dueAt          DateTime?         @map("due_at")
+  examDate       DateTime?         @map("exam_date")
+  subjectName    String?           @map("subject_name")
+  createdById    String            @map("created_by_id")
+  createdAt      DateTime          @default(now()) @map("created_at")
+  branch         Branch            @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  author         User              @relation("ContentAuthor", fields: [createdById], references: [id])
+  tags           ContentTag[]
+  audiences      ContentAudience[]
+  submissions    ContentSubmission[]
+}
+
+model ContentTag {
+  contentId String      @map("content_id")
+  tag       String
+  content   ContentItem @relation(fields: [contentId], references: [id], onDelete: Cascade)
+
+  @@id([contentId, tag])
+}
+
+model ContentAudience {
+  id           String      @id @default(uuid())
+  contentId    String      @map("content_id")
+  audienceType String      @map("audience_type")
+  audienceId   String      @map("audience_id")
+  content      ContentItem @relation(fields: [contentId], references: [id], onDelete: Cascade)
+}
+
+model ContentSubmission {
+  id          String      @id @default(uuid())
+  contentId   String      @map("content_id")
+  studentId   String      @map("student_id")
+  textAnswer  String?     @map("text_answer")
+  submittedAt DateTime    @default(now()) @map("submitted_at")
+  content     ContentItem @relation(fields: [contentId], references: [id], onDelete: Cascade)
+  student     Student     @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  @@unique([contentId, studentId])
+}
+
+model AttendanceSession {
+  id        String             @id @default(uuid())
+  branchId  String             @map("branch_id")
+  sectionId String             @map("section_id")
+  date      DateTime           @db.Date
+  takenById String             @map("taken_by_id")
+  records   AttendanceRecord[]
+
+  @@unique([sectionId, date])
+}
+
+model AttendanceRecord {
+  id        String           @id @default(uuid())
+  sessionId String           @map("session_id")
+  studentId String           @map("student_id")
+  status    AttendanceStatus
+  session   AttendanceSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  student   Student          @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  @@unique([sessionId, studentId])
+}
+
+model LeaveRequest {
+  id          String      @id @default(uuid())
+  requesterId String      @map("requester_id")
+  studentId   String?     @map("student_id")
+  fromDate    DateTime    @map("from_date") @db.Date
+  toDate      DateTime    @map("to_date") @db.Date
+  reason      String
+  status      LeaveStatus @default(pending)
+  createdAt   DateTime    @default(now()) @map("created_at")
+}
+
+model FeeInvoice {
+  id        String   @id @default(uuid())
+  studentId String   @map("student_id")
+  title     String
+  amount    Decimal  @db.Decimal(10, 2)
+  dueDate   DateTime @map("due_date") @db.Date
+  status    String   @default("pending")
+}
+
+model TimetableSlot {
+  id        String @id @default(uuid())
+  sectionId String @map("section_id")
+  dayOfWeek Int    @map("day_of_week")
+  period    Int
+  subject   String
+  teacher   String?
+  startTime String @map("start_time")
+  endTime   String @map("end_time")
+}
+
+model ChatThread {
+  id        String           @id @default(uuid())
+  title     String
+  sectionId String?          @map("section_id")
+  messages  ChatMessage[]
+  participants ChatParticipant[]
+}
+
+model ChatParticipant {
+  id       String     @id @default(uuid())
+  threadId String     @map("thread_id")
+  userId   String     @map("user_id")
+  thread   ChatThread @relation(fields: [threadId], references: [id], onDelete: Cascade)
+
+  @@unique([threadId, userId])
+}
+
+model ChatMessage {
+  id        String     @id @default(uuid())
+  threadId  String     @map("thread_id")
+  userId    String     @map("user_id")
+  body      String
+  createdAt DateTime   @default(now()) @map("created_at")
+  thread    ChatThread @relation(fields: [threadId], references: [id], onDelete: Cascade)
+  user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model BusRoute {
+  id             String @id @default(uuid())
+  organizationId String @map("organization_id")
+  busNumber      String @map("bus_number")
+  routeName      String @map("route_name")
+  latitude       Float  @default(18.5204)
+  longitude      Float  @default(73.8567)
+  speed          Float  @default(0)
+
+  @@unique([organizationId, busNumber])
+}
